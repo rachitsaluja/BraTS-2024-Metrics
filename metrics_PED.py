@@ -340,9 +340,9 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
     """
 
     # Dilation and Threshold Parameters
-    if challenge_name == 'BraTS-MEN-RT':
-        dilation_factor = 1
-        lesion_volume_thresh = 50
+    if challenge_name == 'BraTS-PED':
+        dilation_factor = 5
+        lesion_volume_thresh = 10
 
     final_lesionwise_metrics_df = pd.DataFrame()
     final_metrics_dict = dict()
