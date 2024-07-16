@@ -187,6 +187,10 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
 
     for t in tissue_list:
         try:
+
+            if (t == "SFNH") | (t == "NETC") | (t == "RC"):
+                dil_factor = 5
+
             gt_mat = nib.load(
                 f"./tmp_gt/{gt_file_name}/{gt_base}_{t}.nii.gz").get_fdata()
             gt_affine = nib.load(
@@ -453,6 +457,9 @@ def combine_lesions_tissues(netc_cc, snfh_cc, et_cc, rc_cc):
 
 
 def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
+    
+    if (label_value == "SFNH") | (label_value == "NETC") | (label_value == "RC"):
+        dil_factor = 5
 
     pred_file_name = prediction_seg.split('/')[-1].split('.')[0]
     pred_nii = nib.load(
