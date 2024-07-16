@@ -195,7 +195,7 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
                 gt_dilated_cc_mat=gt_mat_dilation_cc,
                 gt_label_cc=gt_mat_cc)
 
-            if (t == "WT") | (t == "TC") | (t == "NETC"):
+            if (t == "WT") | (t == "TC"):
 
                 nib.save(
                     nib.Nifti1Image(gt_mat_combinedByDilation,
@@ -355,9 +355,18 @@ def combine_lesions_ET(et_cc, netc_cc):
         shutil.copy(et_cc, op_path)
 
 
+def combine_lesions_NETC(netc_cc):
+    op_path = os.path.join(
+        os.path.split(netc_cc)[0],
+        os.path.split(netc_cc)[1].split(".")[0] + "_combined.nii.gz"
+    )
+    shutil.copy(netc_cc, op_path)
+
+
 def combine_lesions_tissues(netc_cc, et_cc):
 
     combine_lesions_ET(et_cc, netc_cc)
+    combine_lesions_NETC(netc_cc)
 
     # print("Combining lesions complete!")
 
