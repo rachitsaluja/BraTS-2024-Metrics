@@ -93,6 +93,40 @@ def get_TissueWiseSeg(prediction_matrix, gt_matrix, tissue_type):
     return prediction_matrix, gt_matrix
 
 
+def get_Predseg_combinedByDilation(pred_dilated_cc_mat, pred_label_cc):
+    """
+    Computes the Corrected Connected Components after combing lesions
+    together with respect to their dilation extent
+
+    Parameters
+    ==========
+    pred_dilated_cc_mat: Numpy Array/Matrix; Ground Truth Dilated Segmentation 
+                       after CC Analysis
+    pred_label_cc: Numpy Array/Matrix; Ground Truth Segmentation after 
+                       CC Analysis
+
+    Output
+    ======
+    pred_seg_combinedByDilation_mat: Numpy Array/Matrix; Ground Truth 
+                                   Segmentation after CC Analysis and 
+                                   combining lesions
+    """
+
+    pred_seg_combinedByDilation_mat = np.zeros_like(pred_dilated_cc_mat)
+
+    for comp in range(np.max(pred_dilated_cc_mat)):
+        comp += 1
+
+        pred_d_tmp = np.zeros_like(pred_dilated_cc_mat)
+        pred_d_tmp[pred_dilated_cc_mat == comp] = 1
+        pred_d_tmp = (pred_label_cc*pred_d_tmp)
+
+        np.place(pred_d_tmp, pred_d_tmp > 0, comp)
+        pred_seg_combinedByDilation_mat += pred_d_tmp
+
+    return pred_seg_combinedByDilation_mat
+
+
 def get_GTseg_combinedByDilation(gt_dilated_cc_mat, gt_label_cc):
     """
     Computes the Corrected Connected Components after combing lesions
@@ -192,12 +226,53 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
         except Exception as e:
             print(f"Error processing {t}: {e}")
 
+    for t in tissue_list:
+        try:
+            lesion_volume_thresh = 50
+            pred_mat = nib.load(
+                f"./tmp_pred/{pred_file_name}/{pred_base}_{t}.nii.gz").get_fdata()
+            pred_affine = nib.load(
+                f"./tmp_pred/{pred_file_name}/{pred_base}_{t}.nii.gz").affine
+            dilation_struct = scipy.ndimage.generate_binary_structure(3, 2)
+            sx, sy, sz = nib.load(
+                f"./tmp_pred/{pred_file_name}/{pred_base}_{t}.nii.gz").header.get_zooms()
+
+            pred_mat_cc = cc3d.connected_components(pred_mat, connectivity=26)
+            pred_mat_dilation = scipy.ndimage.binary_dilation(
+                pred_mat, structure=dilation_struct, iterations=dil_factor)
+            pred_mat_dilation_cc = cc3d.connected_components(
+                pred_mat_dilation, connectivity=26)
+
+            pred_mat_combinedByDilation = get_Predseg_combinedByDilation(
+                pred_dilated_cc_mat=pred_mat_dilation_cc,
+                pred_label_cc=pred_mat_cc)
+
+            labels, counts = np.unique(
+                pred_mat_combinedByDilation, return_counts=True)
+            labels_to_remove = labels[counts <= (
+                lesion_volume_thresh)/(sx*sy*sz)]
+            mask = np.isin(pred_mat_combinedByDilation,
+                           labels_to_remove, invert=True)
+            pred_mat_combinedByDilation = np.where(
+                mask, pred_mat_combinedByDilation, 0)
+
+            if (t == "GTV"):
+
+                nib.save(
+                    nib.Nifti1Image(pred_mat_combinedByDilation,
+                                    affine=pred_affine),
+                    f"./tmp_pred/{pred_file_name}/{pred_base}_{t}_cc_combined.nii.gz"
+                )
+
+        except Exception as e:
+            print(f"Error processing {t}: {e}")
+
 
 def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
 
     pred_file_name = prediction_seg.split('/')[-1].split('.')[0]
     pred_nii = nib.load(
-        f"./tmp_pred/{pred_file_name}/{pred_file_name}_{label_value}.nii.gz")
+        f"./tmp_pred/{pred_file_name}/{pred_file_name}_{label_value}_cc_combined.nii.gz")
 
     gt_file_name = gt_seg.split('/')[-1].split('.')[0]
     gt_nii = nib.load(
@@ -235,10 +310,10 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
     dilation_struct = scipy.ndimage.generate_binary_structure(3, 2)
 
     # Get GT Volume and Pred Volume for the full image
-    full_gt_vol = np.sum(gt_mat)*sx*sy*sz
-    full_pred_vol = np.sum(pred_mat)*sx*sy*sz
+    full_gt_vol = np.sum(gt_mat > 0)*sx*sy*sz
+    full_pred_vol = np.sum(pred_mat > 0)*sx*sy*sz
 
-    pred_mat_cc = cc3d.connected_components(pred_mat, connectivity=26)
+    pred_mat_cc = pred_mat
 
     gt_label_cc = gt_mat.astype(
         np.int32)
@@ -263,7 +338,7 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
             gt_tmp, structure=dilation_struct, iterations=dil_factor)
 
         # Volume of lesion
-        gt_vol = np.sum(gt_tmp)*sx*sy*sz
+        gt_vol = np.sum(gt_tmp > 0)*sx*sy*sz
 
         # Extracting Predicted true positive lesions
         pred_tmp = np.copy(pred_label_cc)
@@ -340,6 +415,10 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
             dil_factor=dilation_factor
         )
 
+        shape_img = nib.load(pred_file).get_fdata().shape
+        hd_value = math.sqrt(
+            (shape_img[0]**2) + (shape_img[1]**2) + (shape_img[2]**2))
+
         metric_df = pd.DataFrame(
             metric_pairs, columns=['predicted_lesion_numbers', 'gt_lesion_numbers',
                                    'gt_lesion_vol', 'dice_lesionwise', 'hd95_lesionwise']
@@ -358,7 +437,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
                                ]).shape[0]
 
         metric_df['Label'] = [label_values[l]]*len(metric_df)
-        metric_df = metric_df.replace(np.inf, 374)
+        metric_df = metric_df.replace(np.inf, hd_value)
 
         final_lesionwise_metrics_df = final_lesionwise_metrics_df.append(
             metric_df)
@@ -410,7 +489,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
     results_df['Labels'] = results_df.index
     results_df = results_df.reset_index(drop=True)
     results_df.insert(0, 'Labels', results_df.pop('Labels'))
-    results_df.replace(np.inf, 374, inplace=True)
+    results_df.replace(np.inf, hd_value, inplace=True)
 
     if output:
         results_df.to_csv(output, index=False)
