@@ -224,6 +224,8 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
 
             if (t == "SFNH") | (t == "NETC") | (t == "RC"):
                 dil_factor = 5
+            else:
+                dil_factor = 3
 
             gt_mat = nib.load(
                 f"./tmp_gt/{gt_file_name}/{gt_base}_{t}.nii.gz").get_fdata()
@@ -268,6 +270,8 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
 
             if (t == "SFNH") | (t == "NETC") | (t == "RC"):
                 dil_factor = 5
+            else:
+                dil_factor = 3
 
             pred_mat = nib.load(
                 f"./tmp_pred/{pred_file_name}/{pred_base}_{t}.nii.gz").get_fdata()
@@ -792,6 +796,8 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         if label_values[l] == "ET":
             lesion_volume_thresh = 10
+        else:
+            lesion_volume_thresh = 20
 
         tp, fn, fp, gt_tp, metric_pairs, full_dice, full_hd95, full_gt_vol, full_pred_vol, full_sens, full_specs = get_LesionWiseScores(
             prediction_seg=pred_file,
