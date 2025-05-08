@@ -524,6 +524,9 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
     elif np.any(pred_mat > 0) and np.all(gt_mat == 0):
         full_nsd_05 = 0
         full_nsd_10 = 0
+    elif np.all(pred_mat == 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 1
+        full_nsd_10 = 1
     else:
         full_nsd_05 = normalized_surface_dice(
             pred_mat,
@@ -614,6 +617,9 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
         elif np.any(pred_tmp > 0) and np.all(gt_tmp == 0):
             nsd_05 = 0
             nsd_10 = 0
+        elif np.all(pred_tmp == 0) and np.all(gt_tmp == 0):
+            nsd_05 = 1
+            nsd_10 = 1
         else:
             nsd_05 = normalized_surface_dice(
                 pred_tmp,
@@ -771,6 +777,12 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         if math.isnan(lesion_wise_dice):
             lesion_wise_dice = 1
+
+        if math.isnan(lesion_wise_nsd_05):
+            lesion_wise_nsd_05 = 1
+
+        if math.isnan(lesion_wise_nsd_10):
+            lesion_wise_nsd_10 = 1
 
         if math.isnan(lesion_wise_hd95):
             lesion_wise_hd95 = 0

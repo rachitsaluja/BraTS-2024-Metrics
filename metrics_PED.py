@@ -9,6 +9,51 @@ import sys
 import math
 from scipy.ndimage import label, generate_binary_structure, binary_dilation
 import shutil
+from medpy.metric.binary import __surface_distances
+
+
+def normalized_surface_dice(a: np.ndarray, b: np.ndarray, threshold: float, spacing: tuple = None, connectivity=1):
+    """
+    Pulled from nnUNet - 
+    https://github.com/MIC-DKFZ/nnUNet/blob/4f2ffabe751977ee66348560c8e99102e8553195/nnunet/evaluation/surface_dice.py#L16
+
+    This implementation differs from the official surface dice implementation! These two are not comparable!!!!!
+
+    The normalized surface dice is symmetric, so it should not matter whether a or b is the reference image
+
+    This implementation natively supports 2D and 3D images. Whether other dimensions are supported depends on the
+    __surface_distances implementation in medpy
+
+    :param a: image 1, must have the same shape as b
+    :param b: image 2, must have the same shape as a
+    :param threshold: distances below this threshold will be counted as true positives. Threshold is in mm, not voxels!
+    (if spacing = (1, 1(, 1)) then one voxel=1mm so the threshold is effectively in voxels)
+    must be a tuple of len dimension(a)
+    :param spacing: how many mm is one voxel in reality? Can be left at None, we then assume an isotropic spacing of 1mm
+    :param connectivity: see scipy.ndimage.generate_binary_structure for more information. I suggest you leave that
+    one alone
+    :return:
+    """
+    assert all([i == j for i, j in zip(a.shape, b.shape)]), "a and b must have the same shape. a.shape= %s, " \
+                                                            "b.shape= %s" % (
+                                                                str(a.shape), str(b.shape))
+    if spacing is None:
+        spacing = tuple([1 for _ in range(len(a.shape))])
+    a_to_b = __surface_distances(a, b, spacing, connectivity)
+    b_to_a = __surface_distances(b, a, spacing, connectivity)
+
+    numel_a = len(a_to_b)
+    numel_b = len(b_to_a)
+
+    tp_a = np.sum(a_to_b <= threshold) / numel_a
+    tp_b = np.sum(b_to_a <= threshold) / numel_b
+
+    fp = np.sum(a_to_b > threshold) / numel_a
+    fn = np.sum(b_to_a > threshold) / numel_b
+
+    # 1e-8 just so that we don't get div by 0
+    dc = (tp_a + tp_b) / (tp_a + tp_b + fp + fn + 1e-8)
+    return dc
 
 
 def dice(im1, im2):
@@ -307,6 +352,31 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
             gt_mat
         )
 
+    if np.any(gt_mat > 0) and np.all(pred_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    elif np.any(pred_mat > 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    elif np.all(pred_mat == 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 1
+        full_nsd_10 = 1
+    else:
+        full_nsd_05 = normalized_surface_dice(
+            pred_mat,
+            gt_mat,
+            threshold=0.5,
+            spacing=(sx, sy, sz),
+            connectivity=1
+        )
+        full_nsd_10 = normalized_surface_dice(
+            pred_mat,
+            gt_mat,
+            threshold=1.0,
+            spacing=(sx, sy, sz),
+            connectivity=1
+        )
+
     # Get HD95 sccre for the full image
 
     if np.all(gt_mat == 0) and np.all(pred_mat == 0):
@@ -375,8 +445,33 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
             gt_tmp, pred_tmp, (sx, sy, sz))
         hd = surface_distance.compute_robust_hausdorff(surface_distances, 95)
 
+        if np.any(gt_tmp > 0) and np.all(pred_tmp == 0):
+            nsd_05 = 0
+            nsd_10 = 0
+        elif np.any(pred_tmp > 0) and np.all(gt_tmp == 0):
+            nsd_05 = 0
+            nsd_10 = 0
+        elif np.all(pred_tmp == 0) and np.all(gt_tmp == 0):
+            nsd_05 = 1
+            nsd_10 = 1
+        else:
+            nsd_05 = normalized_surface_dice(
+                pred_tmp,
+                gt_tmp,
+                threshold=0.5,
+                spacing=(sx, sy, sz),
+                connectivity=1
+            )
+            nsd_10 = normalized_surface_dice(
+                pred_tmp,
+                gt_tmp,
+                threshold=1.0,
+                spacing=(sx, sy, sz),
+                connectivity=1
+            )
+
         metric_pairs.append((intersecting_cc,
-                            gtcomp, gt_vol, dice_score, hd))
+                            gtcomp, gt_vol, dice_score, hd, nsd_05, nsd_10))
 
         # Extracting Number of TP/FP/FN and other data
         if len(intersecting_cc) > 0:
@@ -388,7 +483,7 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
         pred_label_cc[np.isin(
             pred_label_cc, tp+[0], invert=True)])
 
-    return tp, fn, fp, gt_tp, metric_pairs, full_dice, full_hd95, full_gt_vol, full_pred_vol, full_sens, full_specs
+    return tp, fn, fp, gt_tp, metric_pairs, full_dice, full_hd95, full_nsd_05, full_nsd_10, full_gt_vol, full_pred_vol, full_sens, full_specs
 
 
 def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
@@ -423,7 +518,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
     for l in range(len(label_values)):
 
-        tp, fn, fp, gt_tp, metric_pairs, full_dice, full_hd95, full_gt_vol, full_pred_vol, full_sens, full_specs = get_LesionWiseScores(
+        tp, fn, fp, gt_tp, metric_pairs, full_dice, full_hd95, full_nsd_05, full_nsd_10, full_gt_vol, full_pred_vol, full_sens, full_specs = get_LesionWiseScores(
             prediction_seg=pred_file,
             gt_seg=gt_file,
             label_value=label_values[l],
@@ -432,7 +527,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         metric_df = pd.DataFrame(
             metric_pairs, columns=['predicted_lesion_numbers', 'gt_lesion_numbers',
-                                   'gt_lesion_vol', 'dice_lesionwise', 'hd95_lesionwise']
+                                   'gt_lesion_vol', 'dice_lesionwise', 'hd95_lesionwise', 'nsd05_lesionwise', 'nsd10_lesionwise']
         ).sort_values(by=['gt_lesion_numbers'], ascending=True).reset_index(drop=True)
 
         metric_df['_len'] = metric_df['predicted_lesion_numbers'].map(len)
@@ -450,8 +545,10 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
         metric_df['Label'] = [label_values[l]]*len(metric_df)
         metric_df = metric_df.replace(np.inf, 374)
 
-        final_lesionwise_metrics_df = final_lesionwise_metrics_df.append(
-            metric_df)
+        final_lesionwise_metrics_df = pd.concat(
+            [final_lesionwise_metrics_df, metric_df],
+            ignore_index=True
+        )
         metric_df_thresh = metric_df[metric_df['gt_lesion_vol']
                                      > lesion_volume_thresh]
 
@@ -462,6 +559,18 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
             lesion_wise_dice = np.nan
 
         try:
+            lesion_wise_nsd_05 = np.sum(
+                metric_df_thresh['nsd05_lesionwise'])/(len(metric_df_thresh) + len(fp))
+        except:
+            lesion_wise_nsd_05 = np.nan
+
+        try:
+            lesion_wise_nsd_10 = np.sum(
+                metric_df_thresh['nsd10_lesionwise'])/(len(metric_df_thresh) + len(fp))
+        except:
+            lesion_wise_nsd_10 = np.nan
+
+        try:
             lesion_wise_hd95 = (np.sum(
                 metric_df_thresh['hd95_lesionwise']) + len(fp)*374)/(len(metric_df_thresh) + len(fp))
         except:
@@ -469,6 +578,12 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         if math.isnan(lesion_wise_dice):
             lesion_wise_dice = 1
+
+        if math.isnan(lesion_wise_nsd_05):
+            lesion_wise_nsd_05 = 1
+
+        if math.isnan(lesion_wise_nsd_10):
+            lesion_wise_nsd_10 = 1
 
         if math.isnan(lesion_wise_hd95):
             lesion_wise_hd95 = 0
@@ -482,9 +597,13 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
             'Specificity': full_specs,
             'Legacy_Dice': full_dice,
             'Legacy_HD95': full_hd95,
+            'Legacy NSD @ 0.5': full_nsd_05,
+            'Legacy NSD @ 1.0': full_nsd_10,
             'GT_Complete_Volume': full_gt_vol,
             'LesionWise_Score_Dice': lesion_wise_dice,
-            'LesionWise_Score_HD95': lesion_wise_hd95
+            'LesionWise_Score_HD95': lesion_wise_hd95,
+            'LesionWise_Score_NSD @ 0.5': lesion_wise_nsd_05,
+            'LesionWise_Score_NSD @ 1.0': lesion_wise_nsd_10,
         }
 
         final_metrics_dict[label_values[l]] = metrics_dict
