@@ -610,16 +610,24 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
     sx, sy, sz = pred_nii.header.get_zooms()
 
     # Get Dice score for the full image
-    # Get Dice score for the full image
     if np.all(gt_mat == 0) and np.all(pred_mat == 0):
         full_dice = 1.0
-        full_nsd_05 = 1.0
-        full_nsd_10 = 1.0
     else:
         full_dice = dice(
             pred_mat,
             gt_mat
         )
+
+    if np.any(gt_mat > 0) and np.all(pred_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    elif np.any(pred_mat > 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    elif np.all(pred_mat == 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 1
+        full_nsd_10 = 1
+    else:
         full_nsd_05 = normalized_surface_dice(
             pred_mat,
             gt_mat,
@@ -704,20 +712,30 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
             gt_tmp, pred_tmp, (sx, sy, sz))
         hd = surface_distance.compute_robust_hausdorff(surface_distances, 95)
 
-        nsd_05 = normalized_surface_dice(
-            pred_tmp,
-            gt_tmp,
-            threshold=0.5,
-            spacing=(sx, sy, sz),
-            connectivity=1
-        )
-        nsd_10 = normalized_surface_dice(
-            pred_tmp,
-            gt_tmp,
-            threshold=0.5,
-            spacing=(sx, sy, sz),
-            connectivity=1
-        )
+        if np.any(gt_tmp > 0) and np.all(pred_tmp == 0):
+            nsd_05 = 0
+            nsd_10 = 0
+        elif np.any(pred_tmp > 0) and np.all(gt_tmp == 0):
+            nsd_05 = 0
+            nsd_10 = 0
+        elif np.all(pred_tmp == 0) and np.all(gt_tmp == 0):
+            nsd_05 = 1
+            nsd_10 = 1
+        else:
+            nsd_05 = normalized_surface_dice(
+                pred_tmp,
+                gt_tmp,
+                threshold=0.5,
+                spacing=(sx, sy, sz),
+                connectivity=1
+            )
+            nsd_10 = normalized_surface_dice(
+                pred_tmp,
+                gt_tmp,
+                threshold=1.0,
+                spacing=(sx, sy, sz),
+                connectivity=1
+            )
 
         metric_pairs.append((intersecting_cc,
                             gtcomp, gt_vol, dice_score, hd, nsd_05, nsd_10))
@@ -936,6 +954,12 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         if math.isnan(lesion_wise_dice):
             lesion_wise_dice = 1
+
+        if math.isnan(lesion_wise_nsd_05):
+            lesion_wise_nsd_05 = 1
+
+        if math.isnan(lesion_wise_nsd_10):
+            lesion_wise_nsd_10 = 1
 
         if math.isnan(lesion_wise_hd95):
             lesion_wise_hd95 = 0
