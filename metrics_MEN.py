@@ -149,10 +149,6 @@ def get_TissueWiseSeg(prediction_matrix, gt_matrix, tissue_type):
         prediction_matrix = (prediction_matrix == 3).astype(float)
         gt_matrix = (gt_matrix == 3).astype(float)
 
-    elif tissue_type == 'RC':
-        prediction_matrix = (prediction_matrix == 4).astype(float)
-        gt_matrix = (gt_matrix == 4).astype(float)
-
     return prediction_matrix, gt_matrix
 
 
@@ -243,7 +239,7 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
     gt_base = os.path.splitext(
         os.path.splitext(os.path.basename(gt_file))[0])[0]
 
-    tissue_list = ["WT", "TC", "NETC", "ET"]
+    tissue_list = ["WT", "TC", "ET", "NETC", "CC", "ED"]
     for t in tissue_list:
         try:
             pred_tissue_mat, gt_tissue_mat = get_TissueWiseSeg(prediction_matrix=pred_mat,
@@ -278,26 +274,18 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
                 gt_dilated_cc_mat=gt_mat_dilation_cc,
                 gt_label_cc=gt_mat_cc)
 
-            if (t == "WT") | (t == "TC"):
-
-                nib.save(
-                    nib.Nifti1Image(gt_mat_combinedByDilation,
-                                    affine=gt_affine),
-                    f"./tmp_gt/{gt_file_name}/{gt_base}_{t}_cc_combined.nii.gz"
-                )
-            else:
-                nib.save(
-                    nib.Nifti1Image(gt_mat_combinedByDilation,
-                                    affine=gt_affine),
-                    f"./tmp_gt/{gt_file_name}/{gt_base}_{t}_cc.nii.gz"
-                )
+            nib.save(
+                nib.Nifti1Image(gt_mat_combinedByDilation,
+                                affine=gt_affine),
+                f"./tmp_gt/{gt_file_name}/{gt_base}_{t}_cc_combined.nii.gz"
+            )
 
         except Exception as e:
             print(f"Error processing {t}: {e}")
 
     for t in tissue_list:
         try:
-            lesion_volume_thresh = 2
+            lesion_volume_thresh = 10
             pred_mat = nib.load(
                 f"./tmp_pred/{pred_file_name}/{pred_base}_{t}.nii.gz").get_fdata()
             pred_affine = nib.load(
@@ -322,180 +310,14 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
             pred_mat_combinedByDilation = np.where(
                 mask, pred_mat_combinedByDilation, 0)
 
-            if (t == "WT") | (t == "TC"):
-
-                nib.save(
-                    nib.Nifti1Image(pred_mat_combinedByDilation,
-                                    affine=pred_affine),
-                    f"./tmp_pred/{pred_file_name}/{pred_base}_{t}_cc_combined.nii.gz"
-                )
-            else:
-                nib.save(
-                    nib.Nifti1Image(pred_mat_combinedByDilation,
-                                    affine=pred_affine),
-                    f"./tmp_pred/{pred_file_name}/{pred_base}_{t}_cc.nii.gz"
-                )
+            nib.save(
+                nib.Nifti1Image(pred_mat_combinedByDilation,
+                                affine=pred_affine),
+                f"./tmp_pred/{pred_file_name}/{pred_base}_{t}_cc_combined.nii.gz"
+            )
 
         except Exception as e:
             print(f"Error processing {t}: {e}")
-
-
-def get_touching_labels(nifti_img1, nifti_img2):
-    img1 = nib.load(nifti_img1)
-    img2 = nib.load(nifti_img2)
-
-    data1 = img1.get_fdata()
-    data2 = img2.get_fdata()
-
-    structure = generate_binary_structure(3, 2)
-
-    # Create binary masks for each label
-    labels1 = np.unique(data1)[1:]  # Skip the background (label 0)
-    labels2 = np.unique(data2)[1:]  # Skip the background (label 0)
-
-    touching_labels = set()
-
-    for label1 in labels1:
-        mask1 = data1 == label1
-
-        for label2 in labels2:
-            mask2 = data2 == label2
-
-            # Dilate the mask to check for touching
-            dilated_mask1 = binary_dilation(mask1, structure)
-            dilated_mask2 = binary_dilation(mask2, structure)
-
-            if np.any(dilated_mask1 & mask2) or np.any(dilated_mask2 & mask1):
-                touching_labels.add((label1, label2))
-
-    '''
-    
-    print(labels1)
-
-    if touching_labels:
-        for label1, label2 in touching_labels:
-            print(
-                f"Label {label1} in image 1 touches label {label2} in image 2.")
-    else:
-        print("No labels from image 1 touch labels from image 2.")
-    '''
-
-    return touching_labels
-
-
-def relabel_nifti_image(tuples, nifti_image_path, output_path):
-    # Load the NIfTI image
-    img = nib.load(nifti_image_path)
-    img_data = img.get_fdata()
-
-    # Determine the maximum label already in use in the image
-    max_existing_label = int(np.max(img_data))
-
-    # Create a mapping from original labels to new labels
-    label_mapping = {}
-    current_label = max_existing_label + 1  # Start assigning new labels from here
-    seen_common_values = {}
-
-    # First, map each common value to a new unique label not used in the image
-    for original_label, common_value in sorted(tuples):
-        if common_value not in seen_common_values:
-            seen_common_values[common_value] = current_label
-            current_label += 1
-
-    # Then, map each original label to its new label based on the common value
-    for original_label, common_value in sorted(tuples):
-        if original_label not in label_mapping:
-            label_mapping[original_label] = seen_common_values[common_value]
-
-    # Relabel the image data
-    relabeled_data = np.copy(img_data)
-    for original_label, new_label in label_mapping.items():
-        relabeled_data[img_data == original_label] = new_label
-
-    # Save the relabeled image as a new NIfTI file
-    new_img = nib.Nifti1Image(relabeled_data.astype(
-        np.int32), img.affine, img.header)
-    nib.save(new_img, output_path)
-    # print(f'Relabeled image saved to {output_path}')
-
-    # Print the label mapping for verification
-    # print(label_mapping)
-
-
-def reorder_labels_nifti(nifti_image_path, output_path):
-    # Load the NIfTI image
-    img = nib.load(nifti_image_path)
-    img_data = img.get_fdata()
-
-    # Find all unique labels in the image data
-    unique_labels = np.unique(img_data)
-    unique_labels.sort()  # Sort the labels to maintain consistent ordering
-
-    # Remove the background label if it's zero and should not be reassigned
-    if unique_labels[0] == 0:
-        unique_labels = unique_labels[1:]
-
-    # Set a high starting label to avoid conflicts with existing labels
-    start_label = int(np.max(img_data)) + 1
-
-    # First pass: assign temporary labels starting from a high number to avoid overlap
-    temp_label_mapping = {label: i + start_label for i,
-                          label in enumerate(unique_labels)}
-    temp_relabel_data = np.copy(img_data)
-    for original_label, temp_label in temp_label_mapping.items():
-        temp_relabel_data[img_data == original_label] = temp_label
-
-    # Second pass: map temporary labels to final labels starting from 1
-    final_label_mapping = {temp_label: i + 1 for i,
-                           temp_label in enumerate(sorted(temp_label_mapping.values()))}
-    final_relabel_data = np.copy(temp_relabel_data)
-    for temp_label, final_label in final_label_mapping.items():
-        final_relabel_data[temp_relabel_data == temp_label] = final_label
-
-    # Ensure the final label data is cast to an integer type to fix any floating point issues
-    final_relabel_data = final_relabel_data.astype(np.int32)
-
-    # Save the relabeled image as a new NIfTI file
-    new_img = nib.Nifti1Image(final_relabel_data, img.affine, img.header)
-    nib.save(new_img, output_path)
-
-    # print(f'Reordered label image saved to {output_path}')
-
-    # Print the label mappings for verification
-    # print("Temporary Label Mapping:", temp_label_mapping)
-    # print("Final Label Mapping:", final_label_mapping)
-
-
-def combine_lesions_ET(et_cc, netc_cc):
-    op_path = os.path.join(
-        os.path.split(et_cc)[0],
-        os.path.split(et_cc)[1].split(".")[0] + "_combined.nii.gz"
-    )
-
-    touching_labels = get_touching_labels(et_cc, netc_cc)
-    if len(touching_labels) > 1:
-        relabel_nifti_image(touching_labels,
-                            nifti_image_path=et_cc,
-                            output_path=op_path)
-
-    else:
-        shutil.copy(et_cc, op_path)
-
-
-def combine_lesions_NETC(netc_cc):
-    op_path = os.path.join(
-        os.path.split(netc_cc)[0],
-        os.path.split(netc_cc)[1].split(".")[0] + "_combined.nii.gz"
-    )
-    shutil.copy(netc_cc, op_path)
-
-
-def combine_lesions_tissues(netc_cc, et_cc):
-
-    combine_lesions_ET(et_cc, netc_cc)
-    combine_lesions_NETC(netc_cc)
-
-    # print("Combining lesions complete!")
 
 
 def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
@@ -516,13 +338,19 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
     # Get Dice score for the full image
     if np.all(gt_mat == 0) and np.all(pred_mat == 0):
         full_dice = 1.0
-        full_nsd_05 = 1.0
-        full_nsd_10 = 1.0
     else:
         full_dice = dice(
             pred_mat,
             gt_mat
         )
+
+    if np.any(gt_mat > 0) and np.all(pred_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    elif np.any(pred_mat > 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    else:
         full_nsd_05 = normalized_surface_dice(
             pred_mat,
             gt_mat,
@@ -606,20 +434,27 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
             gt_tmp, pred_tmp, (sx, sy, sz))
         hd = surface_distance.compute_robust_hausdorff(surface_distances, 95)
 
-        nsd_05 = normalized_surface_dice(
-            pred_tmp,
-            gt_tmp,
-            threshold=0.5,
-            spacing=(sx, sy, sz),
-            connectivity=1
-        )
-        nsd_10 = normalized_surface_dice(
-            pred_tmp,
-            gt_tmp,
-            threshold=0.5,
-            spacing=(sx, sy, sz),
-            connectivity=1
-        )
+        if np.any(gt_tmp > 0) and np.all(pred_tmp == 0):
+            nsd_05 = 0
+            nsd_10 = 0
+        elif np.any(pred_tmp > 0) and np.all(gt_tmp == 0):
+            nsd_05 = 0
+            nsd_10 = 0
+        else:
+            nsd_05 = normalized_surface_dice(
+                pred_tmp,
+                gt_tmp,
+                threshold=0.5,
+                spacing=(sx, sy, sz),
+                connectivity=1
+            )
+            nsd_10 = normalized_surface_dice(
+                pred_tmp,
+                gt_tmp,
+                threshold=1.0,
+                spacing=(sx, sy, sz),
+                connectivity=1
+            )
 
         metric_pairs.append((intersecting_cc,
                             gtcomp, gt_vol, dice_score, hd, nsd_05, nsd_10))
@@ -656,49 +491,16 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
     """
 
     # Dilation and Threshold Parameters
-    if challenge_name == 'BraTS-MET':
+    if challenge_name == 'BraTS-MEN':
         dilation_factor = 1
-        lesion_volume_thresh = 2
+        lesion_volume_thresh = 50
 
     final_lesionwise_metrics_df = pd.DataFrame()
     final_metrics_dict = dict()
-    label_values = ['WT', 'TC', 'ET', 'RC']
+    label_values = ["WT", "TC", "ET"]
 
     save_tmp_files(pred_file=pred_file, gt_file=gt_file,
                    dil_factor=dilation_factor)
-
-    gt_file_name = gt_file.split('/')[-1].split('.')[0]
-    et_cc = f"./tmp_gt/{gt_file_name}/{gt_file_name}_ET_cc.nii.gz"
-    netc_cc = f"./tmp_gt/{gt_file_name}/{gt_file_name}_NETC_cc.nii.gz"
-
-    combine_lesions_tissues(netc_cc, et_cc)
-
-    reorder_labels_nifti(
-        nifti_image_path=os.path.join(
-            os.path.split(et_cc)[0],
-            os.path.split(et_cc)[1].split(".")[0] + "_combined.nii.gz"
-        ),
-        output_path=os.path.join(
-            os.path.split(et_cc)[0],
-            os.path.split(et_cc)[1].split(".")[0] + "_combined.nii.gz"
-        )
-    )
-
-    pred_file_name = pred_file.split('/')[-1].split('.')[0]
-    et_cc = f"./tmp_pred/{pred_file_name}/{pred_file_name}_ET_cc.nii.gz"
-    netc_cc = f"./tmp_pred/{pred_file_name}/{pred_file_name}_NETC_cc.nii.gz"
-    combine_lesions_tissues(netc_cc, et_cc)
-
-    reorder_labels_nifti(
-        nifti_image_path=os.path.join(
-            os.path.split(et_cc)[0],
-            os.path.split(et_cc)[1].split(".")[0] + "_combined.nii.gz"
-        ),
-        output_path=os.path.join(
-            os.path.split(et_cc)[0],
-            os.path.split(et_cc)[1].split(".")[0] + "_combined.nii.gz"
-        )
-    )
 
     for l in range(len(label_values)):
 
@@ -738,25 +540,25 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         try:
             lesion_wise_dice = np.sum(
-                metric_df_thresh['dice_lesionwise'])/(len(metric_df_thresh) + len(fp) - len(fn_sub))
+                metric_df_thresh['dice_lesionwise'])/(len(metric_df_thresh) + len(fp))
         except:
             lesion_wise_dice = np.nan
 
         try:
             lesion_wise_nsd_05 = np.sum(
-                metric_df_thresh['nsd05_lesionwise'])/(len(metric_df_thresh) + len(fp) - len(fn_sub))
+                metric_df_thresh['nsd05_lesionwise'])/(len(metric_df_thresh) + len(fp))
         except:
             lesion_wise_nsd_05 = np.nan
 
         try:
             lesion_wise_nsd_10 = np.sum(
-                metric_df_thresh['nsd10_lesionwise'])/(len(metric_df_thresh) + len(fp) - len(fn_sub))
+                metric_df_thresh['nsd10_lesionwise'])/(len(metric_df_thresh) + len(fp))
         except:
             lesion_wise_nsd_10 = np.nan
 
         try:
             lesion_wise_hd95 = (np.sum(
-                metric_df_thresh['hd95_lesionwise']) + len(fp)*374)/(len(metric_df_thresh) + len(fp) - len(fn_sub))
+                metric_df_thresh['hd95_lesionwise']) + len(fp)*374)/(len(metric_df_thresh) + len(fp))
         except:
             lesion_wise_hd95 = np.nan
 
