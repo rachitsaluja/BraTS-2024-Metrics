@@ -727,6 +727,10 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
             label_value=label_values[l],
             dil_factor=dilation_factor
         )
+        
+        shape_img = nib.load(pred_file).get_fdata().shape
+        hd_value = math.sqrt(
+            (shape_img[0]**2) + (shape_img[1]**2) + (shape_img[2]**2))
 
         metric_df = pd.DataFrame(
             metric_pairs, columns=['predicted_lesion_numbers', 'gt_lesion_numbers',
@@ -746,7 +750,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
                                ]).shape[0]
 
         metric_df['Label'] = [label_values[l]]*len(metric_df)
-        metric_df = metric_df.replace(np.inf, 374)
+        metric_df = metric_df.replace(np.inf, hd_value)
 
         final_lesionwise_metrics_df = pd.concat(
             [final_lesionwise_metrics_df, metric_df],
@@ -775,7 +779,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         try:
             lesion_wise_hd95 = (np.sum(
-                metric_df_thresh['hd95_lesionwise']) + len(fp)*374)/(len(metric_df_thresh) + len(fp) - len(fn_sub))
+                metric_df_thresh['hd95_lesionwise']) + len(fp)*hd_value)/(len(metric_df_thresh) + len(fp) - len(fn_sub))
         except:
             lesion_wise_hd95 = np.nan
 
@@ -820,7 +824,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
     results_df['Labels'] = results_df.index
     results_df = results_df.reset_index(drop=True)
     results_df.insert(0, 'Labels', results_df.pop('Labels'))
-    results_df.replace(np.inf, 374, inplace=True)
+    results_df.replace(np.inf, hd_value, inplace=True)
 
     if output:
         results_df.to_csv(output, index=False)
