@@ -1,6 +1,6 @@
 connected_components_3d==3.12.1
 MedPy==0.5.2
-nibabel==5.3.2
-numpy==2.2.5
+nibabel==5.0.1
+numpy==1.26.4
 pandas==2.2.3
-scipy==1.15.3
+scipy==1.10.1
