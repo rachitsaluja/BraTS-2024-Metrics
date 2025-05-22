@@ -278,7 +278,7 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
                 gt_dilated_cc_mat=gt_mat_dilation_cc,
                 gt_label_cc=gt_mat_cc)
 
-            if (t == "WT") | (t == "TC"):
+            if (t == "WT") | (t == "TC") | (t == "RC"):
 
                 nib.save(
                     nib.Nifti1Image(gt_mat_combinedByDilation,
@@ -322,7 +322,7 @@ def save_tmp_files(pred_file, gt_file, dil_factor):
             pred_mat_combinedByDilation = np.where(
                 mask, pred_mat_combinedByDilation, 0)
 
-            if (t == "WT") | (t == "TC"):
+            if (t == "WT") | (t == "TC") | (t == "RC"):
 
                 nib.save(
                     nib.Nifti1Image(pred_mat_combinedByDilation,
@@ -753,7 +753,7 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
 
         metric_df['hd95_lesionwise'] = metric_df['hd95_lesionwise'].replace(
             np.inf, hd_value)
-        
+
         final_lesionwise_metrics_df = pd.concat(
             [final_lesionwise_metrics_df, metric_df],
             ignore_index=True
