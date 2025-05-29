@@ -532,7 +532,8 @@ def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
                                ]).shape[0]
 
         metric_df['Label'] = [label_values[l]]*len(metric_df)
-        metric_df = metric_df.replace(np.inf, hd_value)
+        metric_df['hd95_lesionwise'] = metric_df['hd95_lesionwise'].replace(
+            np.inf, hd_value)
 
         final_lesionwise_metrics_df = pd.concat(
             [final_lesionwise_metrics_df, metric_df],
