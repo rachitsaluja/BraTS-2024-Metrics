@@ -656,6 +656,129 @@ def get_LesionWiseScores(prediction_seg, gt_seg, label_value, dil_factor):
     return tp, fn, fp, gt_tp, metric_pairs, full_dice, full_hd95, full_nsd_05, full_nsd_10, full_gt_vol, full_pred_vol, full_sens, full_specs
 
 
+def get_LegacyScores(prediction_seg, gt_seg, label_value):
+    pred_nii = nib.load(prediction_seg)
+    gt_nii = nib.load(gt_seg)
+    pred_mat = pred_nii.get_fdata()
+    gt_mat = gt_nii.get_fdata()
+    
+    sx, sy, sz = pred_nii.header.get_zooms()
+    
+    pred_mat, gt_mat = get_TissueWiseSeg(
+                            prediction_matrix = pred_mat,
+                            gt_matrix = gt_mat,
+                            tissue_type = label_value
+                        )
+    
+    ## Get Dice score for the full image
+    if np.all(gt_mat==0) and np.all(pred_mat==0):
+        full_dice = 1.0
+    else:
+        full_dice = dice(
+                    pred_mat, 
+                    gt_mat
+                )
+       
+    if np.all(gt_mat==0) and np.all(pred_mat==0):
+        full_hd95 = 0.0
+    else:
+        full_sd = surface_distance.compute_surface_distances(gt_mat.astype(int), 
+                                                             pred_mat.astype(int), 
+                                                             (sx,sy,sz))
+        full_hd95 = surface_distance.compute_robust_hausdorff(full_sd, 95)
+
+    ## Get Sensitivity and Specificity
+    full_sens, full_specs = get_sensitivity_and_specificity(result_array = pred_mat, 
+                                                            target_array = gt_mat)
+    
+    ## Get GT Volume and Pred Volume for the full image
+    full_gt_vol = np.sum(gt_mat)*sx*sy*sz
+    full_pred_vol = np.sum(pred_mat)*sx*sy*sz 
+    
+    if np.any(gt_mat > 0) and np.all(pred_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    elif np.any(pred_mat > 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 0
+        full_nsd_10 = 0
+    elif np.all(pred_mat == 0) and np.all(gt_mat == 0):
+        full_nsd_05 = 1
+        full_nsd_10 = 1
+    else:
+        full_nsd_05 = normalized_surface_dice(
+            pred_mat,
+            gt_mat,
+            threshold=0.5,
+            spacing=(sx, sy, sz),
+            connectivity=1
+        )
+        full_nsd_10 = normalized_surface_dice(
+            pred_mat,
+            gt_mat,
+            threshold=1.0,
+            spacing=(sx, sy, sz),
+            connectivity=1
+        )   
+    
+    return full_dice, full_hd95, full_nsd_05, full_nsd_10, full_gt_vol, full_pred_vol, full_sens, full_specs
+    
+
+def get_LegacyResults(pred_file, gt_file, output=None):
+    """
+    Computes the Legacy scores for pair of prediction and ground truth
+    segmentations
+
+    Parameters
+    ==========
+    pred_file: str; location of the prediction segmentation    
+    gt_file: str; location of the gt segmentation
+    challenge_name: str; name of the challenge for parameters
+
+
+    Output
+    ======
+    Saves the performance metrics as CSVs
+    results_df: pd.DataFrame; lesion-wise results with other metrics
+    """
+    final_metrics_dict = dict()
+    label_values = ['WT', 'TC', 'ET', 'RC']
+    
+    shape_img = nib.load(pred_file).get_fdata().shape
+    hd_value = math.sqrt(
+            (shape_img[0]**2) + (shape_img[1]**2) + (shape_img[2]**2))
+    
+    
+    for l in range(len(label_values)):
+        full_dice, full_hd95, full_nsd_05, full_nsd_10, full_gt_vol, full_pred_vol, full_sens, full_specs = get_LegacyScores(
+            prediction_seg=pred_file,
+            gt_seg=gt_file,
+            label_value=label_values[l],
+        )
+    
+        metrics_dict = {
+            'Sensitivity': full_sens,
+            'Specificity': full_specs,
+            'Legacy_Dice': full_dice,
+            'Legacy_HD95': full_hd95,
+            'Legacy NSD @ 0.5': full_nsd_05,
+            'Legacy NSD @ 1.0': full_nsd_10,
+            'GT_Complete_Volume': full_gt_vol,
+        }
+
+        final_metrics_dict[label_values[l]] = metrics_dict
+
+    results_df = pd.DataFrame(final_metrics_dict).T
+    results_df['Labels'] = results_df.index
+    results_df = results_df.reset_index(drop=True)
+    results_df.insert(0, 'Labels', results_df.pop('Labels'))
+    results_df.replace(np.inf, hd_value, inplace=True)
+    
+    if output:
+        results_df.to_csv(output, index=False)
+    
+    return results_df
+    
+
 def get_LesionWiseResults(pred_file, gt_file, challenge_name, output=None):
     """
     Computes the Lesion-wise scores for pair of prediction and ground truth
